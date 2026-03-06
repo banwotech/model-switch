@@ -1,0 +1,40 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+dist-electron/
+out/
+release/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# env
+.env
+.env.*
+!.env.example
+
+# macOS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# typescript
+*.tsbuildinfo
+
+# test & coverage
+coverage/
+.nyc_output/
+
+# runtime files
+*.pid
+*.seed
+*.pid.lock
+
+# electron-builder
+*.blockmap
