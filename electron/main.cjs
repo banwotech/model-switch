@@ -145,11 +145,17 @@ function escapeTomlString(value) {
 
 function buildCodexToml(config) {
   return [
-    `provider = "${escapeTomlString(config.provider)}"`,
-    `api_key = "${escapeTomlString(config.apiKey)}"`,
-    `api_base = "${escapeTomlString(config.apiBase)}"`,
     `model = "${escapeTomlString(config.model)}"`,
-    `updated_at = "${escapeTomlString(config.updatedAt)}"`,
+    `model_provider = "switch"`,
+    '',
+    '[model_providers.switch]',
+    `name = "${escapeTomlString(config.providerName)}"`,
+    `base_url = "${escapeTomlString(config.apiBase)}"`,
+    `wire_api = "responses"`,
+    `requires_openai_auth = false`,
+    '',
+    '[model_providers.switch.http_headers]',
+    `Authorization = "Bearer ${escapeTomlString(config.apiKey)}"`,
     ''
   ].join('\n');
 }
@@ -161,15 +167,38 @@ async function writeClaudeConfig(state, providerId) {
   const providerConfig = state.clientConfig?.claudeCode?.providerConfigs?.[providerId];
   if (!providerConfig) throw new Error('Claude Code 配置不存在');
 
-  const output = {
-    provider: provider.name,
-    apiKey: provider.apiKey,
-    apiBase: providerConfig.apiBase,
-    models: providerConfig.models,
-    updatedAt: new Date().toISOString()
-  };
-
   const targetFile = path.join(os.homedir(), '.claude', 'settings.json');
+
+  // Read existing settings to preserve permissions, hooks, etc.
+  let existing = {};
+  try {
+    const raw = await fs.readFile(targetFile, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') existing = parsed;
+  } catch {
+    // File doesn't exist or isn't valid JSON
+  }
+
+  const env = { ...(existing.env || {}) };
+  env.ANTHROPIC_BASE_URL = providerConfig.apiBase;
+
+  const models = providerConfig.models || {};
+  if (models.defaultModel) env.ANTHROPIC_MODEL = models.defaultModel;
+  else delete env.ANTHROPIC_MODEL;
+
+  if (models.reasoningModel) env.ANTHROPIC_REASONING_MODEL = models.reasoningModel;
+  else delete env.ANTHROPIC_REASONING_MODEL;
+
+  if (models.haikuModel) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = models.haikuModel;
+  else delete env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+
+  if (models.sonnetModel) env.ANTHROPIC_DEFAULT_SONNET_MODEL = models.sonnetModel;
+  else delete env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+
+  if (models.opusModel) env.ANTHROPIC_DEFAULT_OPUS_MODEL = models.opusModel;
+  else delete env.ANTHROPIC_DEFAULT_OPUS_MODEL;
+
+  const output = { ...existing, env };
 
   await fs.mkdir(path.dirname(targetFile), { recursive: true });
   await fs.writeFile(targetFile, JSON.stringify(output, null, 2), 'utf-8');
@@ -183,18 +212,17 @@ async function writeCodexConfig(state, providerId) {
   const providerConfig = state.clientConfig?.codex?.providerConfigs?.[providerId];
   if (!providerConfig) throw new Error('Codex 配置不存在');
 
-  const output = {
-    provider: provider.name,
+  const config = {
+    providerName: provider.name,
     apiKey: provider.apiKey,
     apiBase: providerConfig.apiBase,
-    model: providerConfig.model,
-    updatedAt: new Date().toISOString()
+    model: providerConfig.model
   };
 
   const targetFile = path.join(os.homedir(), '.codex', 'config.toml');
 
   await fs.mkdir(path.dirname(targetFile), { recursive: true });
-  await fs.writeFile(targetFile, buildCodexToml(output), 'utf-8');
+  await fs.writeFile(targetFile, buildCodexToml(config), 'utf-8');
   return targetFile;
 }
 
@@ -228,6 +256,23 @@ app.whenReady().then(() => {
 
   ipcMain.handle('state:save', async (_, nextState) => {
     await writeState(nextState);
+    const state = normalizeState(nextState);
+
+    // Update local config if client is active
+    const claudeActiveId = state.clientConfig?.claudeCode?.activeProviderId;
+    if (claudeActiveId) {
+      try {
+        await writeClaudeConfig(state, claudeActiveId);
+      } catch {}
+    }
+
+    const codexActiveId = state.clientConfig?.codex?.activeProviderId;
+    if (codexActiveId) {
+      try {
+        await writeCodexConfig(state, codexActiveId);
+      } catch {}
+    }
+
     return nextState;
   });
 
