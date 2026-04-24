@@ -398,6 +398,20 @@ select:focus {
   border: 1px solid #bfe8cf;
 }
 
+.warn-tag {
+  margin-left: 8px;
+  font-style: normal;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #a04a00;
+  background: #fdf1e2;
+  border: 1px solid #f2d3a7;
+}
+
 .sub-panel {
   margin-top: 12px;
 }
@@ -474,6 +488,24 @@ select:focus {
 .muted {
   color: var(--muted);
   font-size: 13px;
+}
+
+.preset-endpoints {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.preset-endpoints ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.preset-endpoints code {
+  background: var(--chip-bg, #f4f5f7);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  word-break: break-all;
 }
 
 @media (max-width: 1024px) {

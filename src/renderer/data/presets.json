@@ -1,0 +1,8 @@
+[
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "codexBase": "https://openrouter.ai/api/v1",
+    "claudeBase": "https://openrouter.ai/api"
+  }
+]

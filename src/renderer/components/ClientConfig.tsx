@@ -6,6 +6,7 @@ import type {
   CodexProviderConfig,
   Provider
 } from '../types';
+import { OFFICIAL_PROVIDER_ID } from '../types';
 
 interface Props {
   state: AppState;
@@ -211,17 +212,8 @@ export function ClientConfig({ state, onChange, onActivate, onGoProviderManager 
       ? isClaudeConfigReady(draftClaudeConfig || undefined)
       : isCodexConfigReady(draftCodexConfig || undefined);
 
-  if (!hasProvider) {
-    return (
-      <section className="panel">
-        <div className="empty-state">
-          <h3>还没有可用服务商</h3>
-          <p>先到“服务商管理”添加服务商与模型，再回来配置客户端。</p>
-          <button className="btn primary" onClick={onGoProviderManager}>前往服务商管理</button>
-        </div>
-      </section>
-    );
-  }
+  const officialActive = activeProviderId === OFFICIAL_PROVIDER_ID;
+  const officialLabel = activeTab === 'claudeCode' ? 'Claude Code 官方' : 'Codex 官方';
 
   return (
     <section className="panel">
@@ -254,6 +246,22 @@ export function ClientConfig({ state, onChange, onActivate, onGoProviderManager 
           <span>操作</span>
         </div>
 
+        <div key="__official__" className="provider-config-row">
+          <span>
+            {officialLabel}
+            {officialActive ? <em className="active-tag">已启用</em> : null}
+          </span>
+          <div className="provider-config-actions">
+            <button
+              className="btn success"
+              onClick={() => activateProvider(OFFICIAL_PROVIDER_ID)}
+              disabled={officialActive}
+            >
+              {officialActive ? '已启用' : '启用'}
+            </button>
+          </div>
+        </div>
+
         {state.providers.map((provider) => {
           const isActive = provider.id === activeProviderId;
           const isReady =
@@ -266,6 +274,7 @@ export function ClientConfig({ state, onChange, onActivate, onGoProviderManager 
               <span>
                 {provider.name || '未命名服务商'}
                 {isActive ? <em className="active-tag">已启用</em> : null}
+                {!isReady ? <em className="warn-tag">待配置</em> : null}
               </span>
               <div className="provider-config-actions">
                 <button
@@ -287,6 +296,13 @@ export function ClientConfig({ state, onChange, onActivate, onGoProviderManager 
             </div>
           );
         })}
+
+        {!hasProvider ? (
+          <p className="muted provider-empty">
+            想接入第三方服务？
+            <button className="btn" onClick={onGoProviderManager}>前往服务商管理</button>
+          </p>
+        ) : null}
       </div>
 
       {editingProviderId ? (

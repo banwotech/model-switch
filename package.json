@@ -1,7 +1,7 @@
 {
-  "name": "model-switch-client",
+  "name": "model-switch",
   "version": "0.1.0",
-  "description": "Cross-platform model provider switch client for Claude Code and Codex",
+  "description": "Cross-platform model provider switch for Claude Code and Codex",
   "main": "electron/main.cjs",
   "author": "",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -32,7 +32,7 @@
   },
   "build": {
     "appId": "com.switch.client",
-    "productName": "Model Switch Client",
+    "productName": "Model Switch",
     "directories": {
       "output": "dist-electron",
       "buildResources": "build"
@@ -46,7 +46,7 @@
       "target": [
         "dmg"
       ],
-      "icon": "build/icon.icns"
+      "icon": "build/icon.png"
     },
     "win": {
       "target": [

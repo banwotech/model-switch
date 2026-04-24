@@ -1,10 +1,17 @@
 import { useState } from 'react';
-import type { Provider } from '../types';
+import type { Preset, Provider } from '../types';
+import presetsData from '../data/presets.json';
+
+const PRESETS: Preset[] = presetsData as Preset[];
 
 interface Props {
   providers: Provider[];
   onChange: (providers: Provider[]) => void;
+  onAddFromPreset: (provider: Provider, preset: Preset) => void;
 }
+
+type DialogMode = 'create' | 'edit' | '';
+type CreateTab = 'preset' | 'custom';
 
 function createProvider(): Provider {
   return {
@@ -15,8 +22,6 @@ function createProvider(): Provider {
   };
 }
 
-type DialogMode = 'create' | 'edit' | '';
-
 function cloneProvider(provider: Provider): Provider {
   return {
     ...provider,
@@ -24,18 +29,24 @@ function cloneProvider(provider: Provider): Provider {
   };
 }
 
-export function ProviderManager({ providers, onChange }: Props) {
+export function ProviderManager({ providers, onChange, onAddFromPreset }: Props) {
   const [dialogMode, setDialogMode] = useState<DialogMode>('');
   const [draftProvider, setDraftProvider] = useState<Provider | null>(null);
+  const [createTab, setCreateTab] = useState<CreateTab>('preset');
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('');
 
   const closeDialog = () => {
     setDialogMode('');
     setDraftProvider(null);
+    setCreateTab('preset');
+    setSelectedPresetId('');
   };
 
   const addProvider = () => {
     setDialogMode('create');
     setDraftProvider(createProvider());
+    setCreateTab('preset');
+    setSelectedPresetId('');
   };
 
   const editProvider = (provider: Provider) => {
@@ -44,8 +55,8 @@ export function ProviderManager({ providers, onChange }: Props) {
   };
 
   const deleteProvider = (provider: Provider) => {
-    const providerName = provider.name.trim() || "未命名服务商";
-    const confirmed = window.confirm(`确认删除服务商「」吗？`);
+    const providerName = provider.name.trim() || '未命名服务商';
+    const confirmed = window.confirm(`确认删除服务商「${providerName}」吗？`);
     if (!confirmed) return;
 
     onChange(providers.filter((p) => p.id !== provider.id));
@@ -64,31 +75,22 @@ export function ProviderManager({ providers, onChange }: Props) {
     setDraftProvider(updater(draftProvider));
   };
 
-  const saveProvider = () => {
-    if (!draftProvider) return;
+  const selectPreset = (presetId: string) => {
+    setSelectedPresetId(presetId);
+    const preset = PRESETS.find((p) => p.id === presetId);
+    if (!preset || !draftProvider) return;
+    setDraftProvider({ ...draftProvider, name: preset.name });
+  };
 
-    const cleanedModels = draftProvider.models
-      .map((model) => model.trim())
-      .filter(Boolean);
-
-    if (hasEmptyModel) {
-      return;
+  const switchCreateTab = (tab: CreateTab) => {
+    if (tab === createTab) return;
+    setCreateTab(tab);
+    setSelectedPresetId('');
+    // Don't let name/apiKey leak between tabs — a preset's prefilled name or
+    // a key typed for one provider shouldn't carry into the other flow.
+    if (draftProvider) {
+      setDraftProvider({ ...draftProvider, name: '', apiKey: '' });
     }
-
-    const nextProvider = {
-      ...draftProvider,
-      name: draftProvider.name.trim(),
-      apiKey: draftProvider.apiKey.trim(),
-      models: cleanedModels.length > 0 ? cleanedModels : ['']
-    };
-
-    if (dialogMode === 'create') {
-      onChange([...providers, nextProvider]);
-    } else {
-      onChange(providers.map((provider) => (provider.id === nextProvider.id ? nextProvider : provider)));
-    }
-
-    closeDialog();
   };
 
   const updateModel = (index: number, value: string) => {
@@ -108,7 +110,40 @@ export function ProviderManager({ providers, onChange }: Props) {
   };
 
   const hasEmptyModel = draftProvider ? draftProvider.models.some((model) => !model.trim()) : false;
-  const disableSave = !draftProvider || hasEmptyModel;
+  const isPresetCreate = dialogMode === 'create' && createTab === 'preset';
+  const selectedPreset = isPresetCreate
+    ? PRESETS.find((p) => p.id === selectedPresetId)
+    : undefined;
+  const disableSave =
+    !draftProvider || hasEmptyModel || (isPresetCreate && !selectedPreset);
+
+  const saveProvider = () => {
+    if (!draftProvider) return;
+    if (hasEmptyModel) return;
+
+    const cleanedModels = draftProvider.models
+      .map((model) => model.trim())
+      .filter(Boolean);
+
+    const nextProvider: Provider = {
+      ...draftProvider,
+      name: draftProvider.name.trim(),
+      apiKey: draftProvider.apiKey.trim(),
+      models: cleanedModels.length > 0 ? cleanedModels : ['']
+    };
+
+    if (dialogMode === 'create') {
+      if (createTab === 'preset' && selectedPreset) {
+        onAddFromPreset(nextProvider, selectedPreset);
+      } else {
+        onChange([...providers, nextProvider]);
+      }
+    } else {
+      onChange(providers.map((p) => (p.id === nextProvider.id ? nextProvider : p)));
+    }
+
+    closeDialog();
+  };
 
   return (
     <section className="panel">
@@ -148,7 +183,39 @@ export function ProviderManager({ providers, onChange }: Props) {
             </header>
 
             <div className="modal-content">
+              {dialogMode === 'create' ? (
+                <div className="tab-wrap">
+                  <button
+                    className={`btn ${createTab === 'preset' ? 'primary' : ''}`}
+                    onClick={() => switchCreateTab('preset')}
+                  >
+                    预设服务商
+                  </button>
+                  <button
+                    className={`btn ${createTab === 'custom' ? 'primary' : ''}`}
+                    onClick={() => switchCreateTab('custom')}
+                  >
+                    自定义
+                  </button>
+                </div>
+              ) : null}
+
               <div className="provider-form-stack">
+                {isPresetCreate ? (
+                  <label>
+                    预设
+                    <select
+                      value={selectedPresetId}
+                      onChange={(e) => selectPreset(e.target.value)}
+                    >
+                      <option value="">请选择预设服务商</option>
+                      {PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
                 <label>
                   服务商名称
                   <input
@@ -165,6 +232,22 @@ export function ProviderManager({ providers, onChange }: Props) {
                     placeholder="sk-..."
                   />
                 </label>
+
+                {selectedPreset ? (
+                  <div className="preset-endpoints muted">
+                    端点预览（选预设后会自动写入对应 tab 的 API 地址）：
+                    <ul>
+                      <li>
+                        Codex (OpenAI)：
+                        {selectedPreset.codexBase ? <code>{selectedPreset.codexBase}</code> : '—'}
+                      </li>
+                      <li>
+                        Claude Code (Anthropic)：
+                        {selectedPreset.claudeBase ? <code>{selectedPreset.claudeBase}</code> : '—'}
+                      </li>
+                    </ul>
+                  </div>
+                ) : null}
               </div>
 
               <div className="model-header">

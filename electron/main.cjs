@@ -4,6 +4,8 @@ const fs = require('fs/promises');
 const os = require('os');
 
 const APP_STATE_FILE = 'app-state.json';
+// Keep in sync with OFFICIAL_PROVIDER_ID in src/renderer/types/index.ts
+const OFFICIAL_PROVIDER_ID = '__official__';
 
 /** @typedef {{id:string,name:string,apiKey:string,models:string[]}} Provider */
 /** @typedef {{apiBase:string,models:{defaultModel:string,reasoningModel:string,haikuModel:string,sonnetModel:string,opusModel:string}}} ClaudeProviderConfig */
@@ -96,19 +98,21 @@ function normalizeState(maybeState) {
     if (!codexProviderConfigs[provider.id]) codexProviderConfigs[provider.id] = emptyCodexProviderConfig();
   });
 
+  const isValidActive = (id) => id === OFFICIAL_PROVIDER_ID || providerIds.has(id);
+
   return {
     ...defaults,
     ...state,
     providers,
     clientConfig: {
       claudeCode: {
-        activeProviderId: providerIds.has(state.clientConfig?.claudeCode?.activeProviderId)
+        activeProviderId: isValidActive(state.clientConfig?.claudeCode?.activeProviderId)
           ? state.clientConfig.claudeCode.activeProviderId
           : '',
         providerConfigs: claudeProviderConfigs
       },
       codex: {
-        activeProviderId: providerIds.has(state.clientConfig?.codex?.activeProviderId)
+        activeProviderId: isValidActive(state.clientConfig?.codex?.activeProviderId)
           ? state.clientConfig.codex.activeProviderId
           : '',
         providerConfigs: codexProviderConfigs
@@ -123,13 +127,18 @@ function getStatePath() {
 
 async function readState() {
   const file = getStatePath();
+  let raw;
   try {
-    const raw = await fs.readFile(file, 'utf-8');
-    return normalizeState(JSON.parse(raw));
-  } catch {
-    await writeState(defaultState());
-    return defaultState();
+    raw = await fs.readFile(file, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      await writeState(defaultState());
+      return defaultState();
+    }
+    throw err;
   }
+  // Parsing errors propagate so the user is warned instead of losing data.
+  return normalizeState(JSON.parse(raw));
 }
 
 async function writeState(state) {
@@ -143,11 +152,8 @@ function escapeTomlString(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
-function buildCodexToml(config) {
+function buildCodexSwitchSection(config) {
   return [
-    `model = "${escapeTomlString(config.model)}"`,
-    `model_provider = "switch"`,
-    '',
     '[model_providers.switch]',
     `name = "${escapeTomlString(config.providerName)}"`,
     `base_url = "${escapeTomlString(config.apiBase)}"`,
@@ -155,9 +161,81 @@ function buildCodexToml(config) {
     `requires_openai_auth = false`,
     '',
     '[model_providers.switch.http_headers]',
-    `Authorization = "Bearer ${escapeTomlString(config.apiKey)}"`,
-    ''
+    `Authorization = "Bearer ${escapeTomlString(config.apiKey)}"`
   ].join('\n');
+}
+
+// Strip switch-owned keys/sections, returning preserved user content
+// (profiles, other model_providers, mcp_servers, ...) as a ready-to-serialize
+// { topLines, sections } pair.
+function stripCodexSwitchParts(existingToml) {
+  const OWNED_TOP_KEYS = new Set(['model', 'model_provider']);
+  const isOwnedSection = (name) =>
+    name === 'model_providers.switch' || name.startsWith('model_providers.switch.');
+
+  const lines = (existingToml || '').split('\n');
+  const topLines = [];
+  const sections = [];
+  let current = null;
+
+  for (const line of lines) {
+    // Match single-bracket table headers only; leave [[array-of-tables]] alone.
+    const headerMatch = line.match(/^\s*\[([^\[\]]+)\]\s*$/);
+    if (headerMatch) {
+      if (current) sections.push(current);
+      current = { name: headerMatch[1].trim(), header: line, body: [] };
+      continue;
+    }
+    if (current) current.body.push(line);
+    else topLines.push(line);
+  }
+  if (current) sections.push(current);
+
+  const filteredTop = topLines.filter((line) => {
+    const keyMatch = line.match(/^\s*([A-Za-z0-9_-]+)\s*=/);
+    return !(keyMatch && OWNED_TOP_KEYS.has(keyMatch[1]));
+  });
+  const filteredSections = sections.filter((s) => !isOwnedSection(s.name));
+  return { topLines: filteredTop, sections: filteredSections };
+}
+
+function serializeCodexParts(parts, leading) {
+  const out = [];
+  if (leading) out.push(leading);
+
+  const preservedTop = parts.topLines.join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+  if (preservedTop) {
+    if (out.length) out.push('');
+    out.push(preservedTop);
+  }
+
+  for (const s of parts.sections) {
+    if (out.length) out.push('');
+    out.push(s.header);
+    const body = s.body.join('\n').replace(/\n+$/, '');
+    if (body) out.push(body);
+  }
+
+  return out.length ? out.join('\n') + '\n' : '';
+}
+
+// Merge switch-owned keys/sections into existing TOML while preserving
+// user-authored content.
+function mergeCodexToml(existingToml, config) {
+  const parts = stripCodexSwitchParts(existingToml);
+  const leading = [
+    `model = "${escapeTomlString(config.model)}"`,
+    `model_provider = "switch"`
+  ].join('\n');
+  const preserved = serializeCodexParts(parts, leading);
+  return preserved.replace(/\n$/, '') + '\n\n' + buildCodexSwitchSection(config) + '\n';
+}
+
+// Remove only switch-owned keys/sections, keeping everything else the user
+// has in their config.toml.
+function stripCodexSwitchToml(existingToml) {
+  const parts = stripCodexSwitchParts(existingToml);
+  return serializeCodexParts(parts, '');
 }
 
 async function writeClaudeConfig(state, providerId) {
@@ -170,17 +248,26 @@ async function writeClaudeConfig(state, providerId) {
   const targetFile = path.join(os.homedir(), '.claude', 'settings.json');
 
   // Read existing settings to preserve permissions, hooks, etc.
+  // ENOENT → start fresh; parse errors propagate so we don't silently
+  // overwrite a user's settings file that happens to have a typo.
   let existing = {};
+  let raw;
   try {
-    const raw = await fs.readFile(targetFile, 'utf-8');
+    raw = await fs.readFile(targetFile, 'utf-8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  if (raw !== undefined) {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') existing = parsed;
-  } catch {
-    // File doesn't exist or isn't valid JSON
   }
 
   const env = { ...(existing.env || {}) };
-  env.ANTHROPIC_BASE_URL = providerConfig.apiBase;
+  if (providerConfig.apiBase) env.ANTHROPIC_BASE_URL = providerConfig.apiBase;
+  else delete env.ANTHROPIC_BASE_URL;
+
+  if (provider.apiKey) env.ANTHROPIC_AUTH_TOKEN = provider.apiKey;
+  else delete env.ANTHROPIC_AUTH_TOKEN;
 
   const models = providerConfig.models || {};
   if (models.defaultModel) env.ANTHROPIC_MODEL = models.defaultModel;
@@ -221,8 +308,62 @@ async function writeCodexConfig(state, providerId) {
 
   const targetFile = path.join(os.homedir(), '.codex', 'config.toml');
 
+  let existingToml = '';
+  try {
+    existingToml = await fs.readFile(targetFile, 'utf-8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+
   await fs.mkdir(path.dirname(targetFile), { recursive: true });
-  await fs.writeFile(targetFile, buildCodexToml(config), 'utf-8');
+  await fs.writeFile(targetFile, mergeCodexToml(existingToml, config), 'utf-8');
+  return targetFile;
+}
+
+const CLAUDE_ENV_KEYS = [
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_REASONING_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL'
+];
+
+// Remove switch-managed env keys from ~/.claude/settings.json without touching
+// anything else (permissions, hooks, other env vars, etc.).
+async function clearClaudeConfig() {
+  const targetFile = path.join(os.homedir(), '.claude', 'settings.json');
+  let raw;
+  try {
+    raw = await fs.readFile(targetFile, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return targetFile;
+    throw err;
+  }
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object') return targetFile;
+
+  const env = { ...(parsed.env || {}) };
+  for (const key of CLAUDE_ENV_KEYS) delete env[key];
+
+  const output = { ...parsed, env };
+  await fs.writeFile(targetFile, JSON.stringify(output, null, 2), 'utf-8');
+  return targetFile;
+}
+
+// Remove the [model_providers.switch*] sections and owned top-level keys from
+// ~/.codex/config.toml.
+async function clearCodexConfig() {
+  const targetFile = path.join(os.homedir(), '.codex', 'config.toml');
+  let existingToml;
+  try {
+    existingToml = await fs.readFile(targetFile, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return targetFile;
+    throw err;
+  }
+  await fs.writeFile(targetFile, stripCodexSwitchToml(existingToml), 'utf-8');
   return targetFile;
 }
 
@@ -255,22 +396,60 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('state:save', async (_, nextState) => {
+    // Read the previously-persisted state before overwriting so we can detect
+    // "active provider cleared" transitions and clean the client config.
+    let prevState;
+    try {
+      prevState = await readState();
+    } catch {
+      prevState = defaultState();
+    }
+
     await writeState(nextState);
     const state = normalizeState(nextState);
 
-    // Update local config if client is active
-    const claudeActiveId = state.clientConfig?.claudeCode?.activeProviderId;
-    if (claudeActiveId) {
+    const prevClaudeActiveId = prevState.clientConfig?.claudeCode?.activeProviderId || '';
+    const claudeActiveId = state.clientConfig?.claudeCode?.activeProviderId || '';
+    if (claudeActiveId === OFFICIAL_PROVIDER_ID) {
+      try {
+        await clearClaudeConfig();
+      } catch (error) {
+        console.error('[state:save] clearClaudeConfig failed:', error);
+      }
+    } else if (claudeActiveId) {
       try {
         await writeClaudeConfig(state, claudeActiveId);
-      } catch {}
+      } catch (error) {
+        console.error('[state:save] writeClaudeConfig failed:', error);
+      }
+    } else if (prevClaudeActiveId) {
+      try {
+        await clearClaudeConfig();
+      } catch (error) {
+        console.error('[state:save] clearClaudeConfig failed:', error);
+      }
     }
 
-    const codexActiveId = state.clientConfig?.codex?.activeProviderId;
-    if (codexActiveId) {
+    const prevCodexActiveId = prevState.clientConfig?.codex?.activeProviderId || '';
+    const codexActiveId = state.clientConfig?.codex?.activeProviderId || '';
+    if (codexActiveId === OFFICIAL_PROVIDER_ID) {
+      try {
+        await clearCodexConfig();
+      } catch (error) {
+        console.error('[state:save] clearCodexConfig failed:', error);
+      }
+    } else if (codexActiveId) {
       try {
         await writeCodexConfig(state, codexActiveId);
-      } catch {}
+      } catch (error) {
+        console.error('[state:save] writeCodexConfig failed:', error);
+      }
+    } else if (prevCodexActiveId) {
+      try {
+        await clearCodexConfig();
+      } catch (error) {
+        console.error('[state:save] clearCodexConfig failed:', error);
+      }
     }
 
     return nextState;
@@ -281,11 +460,15 @@ app.whenReady().then(() => {
     if (!providerId) throw new Error('未指定服务商');
 
     if (client === 'claudeCode') {
-      const target = await writeClaudeConfig(state, providerId);
+      const target = providerId === OFFICIAL_PROVIDER_ID
+        ? await clearClaudeConfig()
+        : await writeClaudeConfig(state, providerId);
       return { success: true, target };
     }
     if (client === 'codex') {
-      const target = await writeCodexConfig(state, providerId);
+      const target = providerId === OFFICIAL_PROVIDER_ID
+        ? await clearCodexConfig()
+        : await writeCodexConfig(state, providerId);
       return { success: true, target };
     }
     throw new Error('未知客户端');

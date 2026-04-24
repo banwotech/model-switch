@@ -1,4 +1,5 @@
 import type { AppState, ClaudeProviderConfig, CodexProviderConfig } from '../types';
+import { OFFICIAL_PROVIDER_ID } from '../types';
 
 function emptyClaudeProviderConfig(): ClaudeProviderConfig {
   return {
@@ -63,25 +64,35 @@ export function ensureValidClientConfig(state: AppState): AppState {
     };
   });
 
-  if (!providerIds.has(state.clientConfig.claudeCode.activeProviderId)) {
-    state.clientConfig.claudeCode.activeProviderId = '';
-  }
-
-  if (!providerIds.has(state.clientConfig.codex.activeProviderId)) {
-    state.clientConfig.codex.activeProviderId = '';
-  }
-
-  state.clientConfig.claudeCode.providerConfigs = nextClaudeProviderConfigs;
-  state.clientConfig.codex.providerConfigs = nextCodexProviderConfigs;
-
   state.providers.forEach((provider) => {
-    if (!state.clientConfig.claudeCode.providerConfigs[provider.id]) {
-      state.clientConfig.claudeCode.providerConfigs[provider.id] = emptyClaudeProviderConfig();
+    if (!nextClaudeProviderConfigs[provider.id]) {
+      nextClaudeProviderConfigs[provider.id] = emptyClaudeProviderConfig();
     }
-    if (!state.clientConfig.codex.providerConfigs[provider.id]) {
-      state.clientConfig.codex.providerConfigs[provider.id] = emptyCodexProviderConfig();
+    if (!nextCodexProviderConfigs[provider.id]) {
+      nextCodexProviderConfigs[provider.id] = emptyCodexProviderConfig();
     }
   });
 
-  return state;
+  const isValidActive = (id: string) => id === OFFICIAL_PROVIDER_ID || providerIds.has(id);
+
+  const claudeActive = isValidActive(state.clientConfig.claudeCode.activeProviderId)
+    ? state.clientConfig.claudeCode.activeProviderId
+    : '';
+  const codexActive = isValidActive(state.clientConfig.codex.activeProviderId)
+    ? state.clientConfig.codex.activeProviderId
+    : '';
+
+  return {
+    ...state,
+    clientConfig: {
+      claudeCode: {
+        activeProviderId: claudeActive,
+        providerConfigs: nextClaudeProviderConfigs
+      },
+      codex: {
+        activeProviderId: codexActive,
+        providerConfigs: nextCodexProviderConfigs
+      }
+    }
+  };
 }

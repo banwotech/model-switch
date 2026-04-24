@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ProviderManager } from './components/ProviderManager';
 import { ClientConfig } from './components/ClientConfig';
-import type { AppState, ClientType } from './types';
+import type { AppState, ClientType, Preset, Provider } from './types';
+import { OFFICIAL_PROVIDER_ID } from './types';
 import { ensureValidClientConfig } from './utils/state';
 
 type MainMenu = 'clientConfig' | 'providerManager';
@@ -59,6 +60,7 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [mainMenu, setMainMenu] = useState<MainMenu>('clientConfig');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const skipFirstSaveRef = useRef(true);
 
   useEffect(() => {
     window.switchAPI
@@ -77,6 +79,13 @@ export function App() {
 
   useEffect(() => {
     if (loading) return;
+    // Skip the save triggered by the initial readState hydration — saving here
+    // would overwrite the user's ~/.claude/settings.json and ~/.codex/config.toml
+    // on every launch, even when the user hasn't edited anything.
+    if (skipFirstSaveRef.current) {
+      skipFirstSaveRef.current = false;
+      return;
+    }
 
     setSaveStatus('saving');
     const id = setTimeout(async () => {
@@ -109,7 +118,45 @@ export function App() {
     handleStateChange({ ...state, providers });
   };
 
+  const handleAddFromPreset = (provider: Provider, preset: Preset) => {
+    const claudeConfigs = { ...state.clientConfig.claudeCode.providerConfigs };
+    if (preset.claudeBase) {
+      claudeConfigs[provider.id] = {
+        apiBase: preset.claudeBase,
+        models: {
+          defaultModel: '',
+          reasoningModel: '',
+          haikuModel: '',
+          sonnetModel: '',
+          opusModel: ''
+        }
+      };
+    }
+
+    const codexConfigs = { ...state.clientConfig.codex.providerConfigs };
+    if (preset.codexBase) {
+      codexConfigs[provider.id] = { apiBase: preset.codexBase, model: '' };
+    }
+
+    handleStateChange({
+      ...state,
+      providers: [...state.providers, provider],
+      clientConfig: {
+        claudeCode: {
+          ...state.clientConfig.claudeCode,
+          providerConfigs: claudeConfigs
+        },
+        codex: {
+          ...state.clientConfig.codex,
+          providerConfigs: codexConfigs
+        }
+      }
+    });
+  };
+
   const validateBeforeActivate = (client: ClientType, providerId: string): string | null => {
+    if (providerId === OFFICIAL_PROVIDER_ID) return null;
+
     const provider = state.providers.find((p) => p.id === providerId);
     if (!provider) return '服务商不存在';
 
@@ -136,7 +183,9 @@ export function App() {
     try {
       const result = await window.switchAPI.activateConfig(client, providerId, state);
       const label = client === 'claudeCode' ? 'Claude Code' : 'Codex';
-      const providerName = state.providers.find((p) => p.id === providerId)?.name || '未命名服务商';
+      const providerName = providerId === OFFICIAL_PROVIDER_ID
+        ? '官方'
+        : (state.providers.find((p) => p.id === providerId)?.name || '未命名服务商');
       setNotice(`${label} 已启用服务商 ${providerName}，配置写入：${result.target}`);
       setTimeout(() => setNotice(''), 4200);
     } catch (activateError) {
@@ -210,7 +259,11 @@ export function App() {
                 onGoProviderManager={() => setMainMenu('providerManager')}
               />
             ) : (
-              <ProviderManager providers={state.providers} onChange={handleProviderChange} />
+              <ProviderManager
+                providers={state.providers}
+                onChange={handleProviderChange}
+                onAddFromPreset={handleAddFromPreset}
+              />
             )}
           </div>
         </section>
