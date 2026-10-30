@@ -1,4 +1,10 @@
-import type { AppState, ClaudeProviderConfig, CodexProviderConfig } from '../types';
+import type {
+  AppState,
+  GeminiCliProviderConfig,
+  ClaudeProviderConfig,
+  CodexProviderConfig,
+  OpencodeProviderConfig
+} from '../types';
 import { OFFICIAL_PROVIDER_ID } from '../types';
 
 function emptyClaudeProviderConfig(): ClaudeProviderConfig {
@@ -15,6 +21,20 @@ function emptyClaudeProviderConfig(): ClaudeProviderConfig {
 }
 
 function emptyCodexProviderConfig(): CodexProviderConfig {
+  return {
+    apiBase: '',
+    model: ''
+  };
+}
+
+function emptyGeminiCliProviderConfig(): GeminiCliProviderConfig {
+  return {
+    apiBase: '',
+    model: ''
+  };
+}
+
+function emptyOpencodeProviderConfig(): OpencodeProviderConfig {
   return {
     apiBase: '',
     model: ''
@@ -64,12 +84,46 @@ export function ensureValidClientConfig(state: AppState): AppState {
     };
   });
 
+  const nextGeminiCliProviderConfigs: Record<string, GeminiCliProviderConfig> = {};
+  Object.entries(state.clientConfig.geminiCli?.providerConfigs || {}).forEach(([providerId, cfg]) => {
+    if (!providerIds.has(providerId)) return;
+
+    const provider = state.providers.find((p) => p.id === providerId);
+    const providerModels = new Set(provider?.models ?? []);
+    const model = cfg?.model || '';
+
+    nextGeminiCliProviderConfigs[providerId] = {
+      apiBase: cfg?.apiBase || '',
+      model: model && providerModels.has(model) ? model : ''
+    };
+  });
+
+  const nextOpencodeProviderConfigs: Record<string, OpencodeProviderConfig> = {};
+  Object.entries(state.clientConfig.opencode?.providerConfigs || {}).forEach(([providerId, cfg]) => {
+    if (!providerIds.has(providerId)) return;
+
+    const provider = state.providers.find((p) => p.id === providerId);
+    const providerModels = new Set(provider?.models ?? []);
+    const model = cfg?.model || '';
+
+    nextOpencodeProviderConfigs[providerId] = {
+      apiBase: cfg?.apiBase || '',
+      model: model && providerModels.has(model) ? model : ''
+    };
+  });
+
   state.providers.forEach((provider) => {
     if (!nextClaudeProviderConfigs[provider.id]) {
       nextClaudeProviderConfigs[provider.id] = emptyClaudeProviderConfig();
     }
     if (!nextCodexProviderConfigs[provider.id]) {
       nextCodexProviderConfigs[provider.id] = emptyCodexProviderConfig();
+    }
+    if (!nextGeminiCliProviderConfigs[provider.id]) {
+      nextGeminiCliProviderConfigs[provider.id] = emptyGeminiCliProviderConfig();
+    }
+    if (!nextOpencodeProviderConfigs[provider.id]) {
+      nextOpencodeProviderConfigs[provider.id] = emptyOpencodeProviderConfig();
     }
   });
 
@@ -80,6 +134,12 @@ export function ensureValidClientConfig(state: AppState): AppState {
     : '';
   const codexActive = isValidActive(state.clientConfig.codex.activeProviderId)
     ? state.clientConfig.codex.activeProviderId
+    : '';
+  const geminiCliActive = isValidActive(state.clientConfig.geminiCli?.activeProviderId || '')
+    ? state.clientConfig.geminiCli?.activeProviderId || ''
+    : '';
+  const opencodeActive = isValidActive(state.clientConfig.opencode?.activeProviderId || '')
+    ? state.clientConfig.opencode?.activeProviderId || ''
     : '';
 
   return {
@@ -92,6 +152,14 @@ export function ensureValidClientConfig(state: AppState): AppState {
       codex: {
         activeProviderId: codexActive,
         providerConfigs: nextCodexProviderConfigs
+      },
+      geminiCli: {
+        activeProviderId: geminiCliActive,
+        providerConfigs: nextGeminiCliProviderConfigs
+      },
+      opencode: {
+        activeProviderId: opencodeActive,
+        providerConfigs: nextOpencodeProviderConfigs
       }
     }
   };

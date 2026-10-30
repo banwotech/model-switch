@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Preset, Provider } from '../types';
 import presetsData from '../data/presets.json';
 
@@ -8,6 +8,9 @@ interface Props {
   providers: Provider[];
   onChange: (providers: Provider[]) => void;
   onAddFromPreset: (provider: Provider, preset: Preset) => void;
+  // Increment to programmatically open the "add provider" dialog from a parent
+  // (App.tsx renders the trigger button in the page header).
+  addRequestNonce: number;
 }
 
 type DialogMode = 'create' | 'edit' | '';
@@ -29,22 +32,28 @@ function cloneProvider(provider: Provider): Provider {
   };
 }
 
-export function ProviderManager({ providers, onChange, onAddFromPreset }: Props) {
+export function ProviderManager({ providers, onChange, onAddFromPreset, addRequestNonce }: Props) {
   const [dialogMode, setDialogMode] = useState<DialogMode>('');
   const [draftProvider, setDraftProvider] = useState<Provider | null>(null);
   const [createTab, setCreateTab] = useState<CreateTab>('preset');
   const [selectedPresetId, setSelectedPresetId] = useState<string>('');
 
+  // 记录已处理的 nonce：取消弹窗不会重置父组件的 nonce，组件因切换页面
+  // 重新挂载时 ref 初始化为当前值，避免残留 nonce 导致弹窗被再次打开。
+  const handledNonceRef = useRef(addRequestNonce);
+
+  useEffect(() => {
+    if (addRequestNonce <= handledNonceRef.current) return;
+    handledNonceRef.current = addRequestNonce;
+    setDialogMode('create');
+    setDraftProvider(createProvider());
+    setCreateTab('preset');
+    setSelectedPresetId('');
+  }, [addRequestNonce]);
+
   const closeDialog = () => {
     setDialogMode('');
     setDraftProvider(null);
-    setCreateTab('preset');
-    setSelectedPresetId('');
-  };
-
-  const addProvider = () => {
-    setDialogMode('create');
-    setDraftProvider(createProvider());
     setCreateTab('preset');
     setSelectedPresetId('');
   };
@@ -146,12 +155,7 @@ export function ProviderManager({ providers, onChange, onAddFromPreset }: Props)
   };
 
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>服务商列表</h2>
-        <button className="btn primary" onClick={addProvider}>添加服务商</button>
-      </header>
-
+    <>
       <div className="provider-table">
         <div className="provider-table-row provider-table-head">
           <span>服务商名称</span>
@@ -278,6 +282,6 @@ export function ProviderManager({ providers, onChange, onAddFromPreset }: Props)
           </div>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }

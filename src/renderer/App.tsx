@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ProviderManager } from './components/ProviderManager';
 import { ClientConfig } from './components/ClientConfig';
 import type { AppState, ClientType, Preset, Provider } from './types';
@@ -41,8 +41,23 @@ const EMPTY_STATE: AppState = {
     codex: {
       activeProviderId: '',
       providerConfigs: {}
+    },
+    geminiCli: {
+      activeProviderId: '',
+      providerConfigs: {}
+    },
+    opencode: {
+      activeProviderId: '',
+      providerConfigs: {}
     }
   }
+};
+
+const CLIENT_LABEL: Record<ClientType, string> = {
+  claudeCode: 'Claude Code',
+  codex: 'Codex',
+  geminiCli: 'Gemini CLI',
+  opencode: 'OpenCode'
 };
 
 const MENU_META: Record<MainMenu, { title: string }> = {
@@ -60,6 +75,7 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [mainMenu, setMainMenu] = useState<MainMenu>('clientConfig');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [addProviderNonce, setAddProviderNonce] = useState(0);
   const skipFirstSaveRef = useRef(true);
 
   useEffect(() => {
@@ -138,6 +154,16 @@ export function App() {
       codexConfigs[provider.id] = { apiBase: preset.codexBase, model: '' };
     }
 
+    const geminiCliConfigs = { ...state.clientConfig.geminiCli.providerConfigs };
+    if (preset.geminiCliBase) {
+      geminiCliConfigs[provider.id] = { apiBase: preset.geminiCliBase, model: '' };
+    }
+
+    const opencodeConfigs = { ...state.clientConfig.opencode.providerConfigs };
+    if (preset.opencodeBase) {
+      opencodeConfigs[provider.id] = { apiBase: preset.opencodeBase, model: '' };
+    }
+
     handleStateChange({
       ...state,
       providers: [...state.providers, provider],
@@ -149,6 +175,14 @@ export function App() {
         codex: {
           ...state.clientConfig.codex,
           providerConfigs: codexConfigs
+        },
+        geminiCli: {
+          ...state.clientConfig.geminiCli,
+          providerConfigs: geminiCliConfigs
+        },
+        opencode: {
+          ...state.clientConfig.opencode,
+          providerConfigs: opencodeConfigs
         }
       }
     });
@@ -160,16 +194,24 @@ export function App() {
     const provider = state.providers.find((p) => p.id === providerId);
     if (!provider) return '服务商不存在';
 
+    const label = CLIENT_LABEL[client];
+
     if (client === 'claudeCode') {
       const cfg = state.clientConfig.claudeCode.providerConfigs[providerId];
-      if (!cfg?.apiBase?.trim()) return 'Claude Code 的 API 地址不能为空';
-      if (!cfg.models.defaultModel) return 'Claude Code 的默认模型不能为空';
+      if (!cfg?.apiBase?.trim()) return `${label} 的 API 地址不能为空`;
+      if (!cfg.models.defaultModel) return `${label} 的默认模型不能为空`;
       return null;
     }
 
-    const cfg = state.clientConfig.codex.providerConfigs[providerId];
-    if (!cfg?.apiBase?.trim()) return 'Codex 的 API 地址不能为空';
-    if (!cfg.model) return 'Codex 模型不能为空';
+    const simpleCfg =
+      client === 'codex'
+        ? state.clientConfig.codex.providerConfigs[providerId]
+        : client === 'geminiCli'
+        ? state.clientConfig.geminiCli.providerConfigs[providerId]
+        : state.clientConfig.opencode.providerConfigs[providerId];
+
+    if (!simpleCfg?.apiBase?.trim()) return `${label} 的 API 地址不能为空`;
+    if (!simpleCfg.model) return `${label} 模型不能为空`;
     return null;
   };
 
@@ -182,7 +224,7 @@ export function App() {
 
     try {
       const result = await window.switchAPI.activateConfig(client, providerId, state);
-      const label = client === 'claudeCode' ? 'Claude Code' : 'Codex';
+      const label = CLIENT_LABEL[client];
       const providerName = providerId === OFFICIAL_PROVIDER_ID
         ? '官方'
         : (state.providers.find((p) => p.id === providerId)?.name || '未命名服务商');
@@ -240,13 +282,18 @@ export function App() {
 
       <main className="main-area">
         <header className="main-header">
-          <div>
-            <h2 className="page-title">
-              {titleIcon}
-              {MENU_META[mainMenu].title}
-            </h2>
+          <h2 className="page-title">
+            {titleIcon}
+            {MENU_META[mainMenu].title}
+          </h2>
+          <div className="main-header-actions">
+            {notice ? <p className="notice">{notice}</p> : null}
+            {mainMenu === 'providerManager' ? (
+              <button className="btn primary" onClick={() => setAddProviderNonce((n) => n + 1)}>
+                添加服务商
+              </button>
+            ) : null}
           </div>
-          {notice ? <p className="notice">{notice}</p> : null}
         </header>
 
         <section className="canvas">
@@ -263,6 +310,7 @@ export function App() {
                 providers={state.providers}
                 onChange={handleProviderChange}
                 onAddFromPreset={handleAddFromPreset}
+                addRequestNonce={addProviderNonce}
               />
             )}
           </div>

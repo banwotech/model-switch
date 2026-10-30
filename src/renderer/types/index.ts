@@ -1,4 +1,4 @@
-export type ClientType = 'claudeCode' | 'codex';
+export type ClientType = 'claudeCode' | 'codex' | 'geminiCli' | 'opencode';
 
 // Sentinel activeProviderId meaning "use the client's built-in / official
 // endpoint". Selecting it strips switch-managed fields from the client's
@@ -20,6 +20,8 @@ export interface Preset {
   name: string;
   codexBase?: string;
   claudeBase?: string;
+  geminiCliBase?: string;
+  opencodeBase?: string;
 }
 
 export interface ClaudeProviderConfig {
@@ -38,6 +40,16 @@ export interface CodexProviderConfig {
   model: string;
 }
 
+export interface GeminiCliProviderConfig {
+  apiBase: string;
+  model: string;
+}
+
+export interface OpencodeProviderConfig {
+  apiBase: string;
+  model: string;
+}
+
 export interface ClaudeCodeConfig {
   activeProviderId: string;
   providerConfigs: Record<string, ClaudeProviderConfig>;
@@ -48,11 +60,23 @@ export interface CodexConfig {
   providerConfigs: Record<string, CodexProviderConfig>;
 }
 
+export interface GeminiCliConfig {
+  activeProviderId: string;
+  providerConfigs: Record<string, GeminiCliProviderConfig>;
+}
+
+export interface OpencodeConfig {
+  activeProviderId: string;
+  providerConfigs: Record<string, OpencodeProviderConfig>;
+}
+
 export interface AppState {
   providers: Provider[];
   clientConfig: {
     claudeCode: ClaudeCodeConfig;
     codex: CodexConfig;
+    geminiCli: GeminiCliConfig;
+    opencode: OpencodeConfig;
   };
 }
 

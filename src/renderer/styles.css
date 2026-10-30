@@ -129,8 +129,14 @@ body {
   padding: 24px 30px 16px;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 20px;
+}
+
+.main-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .main-header h2 {
@@ -220,7 +226,7 @@ body {
 }
 
 .provider-table-head {
-  background: #f7f7f7;
+  background: #fff;
   font-size: 12px;
   color: var(--muted);
 }
@@ -342,6 +348,18 @@ select:focus {
   gap: 6px;
 }
 
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+}
+
 .config-block {
   display: flex;
   flex-direction: column;
@@ -369,7 +387,7 @@ select:focus {
 }
 
 .provider-config-head {
-  background: #f7f7f7;
+  background: #fff;
   font-size: 12px;
   color: var(--muted);
 }
